@@ -82,7 +82,7 @@ class WC_API_Client {
 	/**
 	 * Get all orders
 	 * @param  array  $params
-	 * @return mixed|jason string
+	 * @return mixed|json string
 	 */
 	public function get_orders( $params = array() ) {
 		return $this->_make_api_call( 'orders', $params );
@@ -334,12 +334,22 @@ class WC_API_Client {
 	}
 
 	/**
+	 * Associative array.
+	 *
+	 * Especially note 'X-WC-Total' for the total number of results,
+	 * and 'X-WC-TotalPages' for the number of pages of results to be fetched.
+	 * Specifiy array( 'page' => N ) as $params to _make_api_call (and wrappers)
+	 * to fetch page 2 up to and incuding 'X-WC-TotalPages'.
+	 */
+	public $last_headers;
+
+	/**
 	 * Make the call to the API
 	 * @param  string $endpoint
-	 * @param  array  $params flat array
+	 * @param  array  $params associative array
 	 * @param  string $method
-	 * @param  mixed  $method POST content
-	 * @return mixed|json string
+	 * @param  mixed  $body POST content, will be JSON encoded.
+	 * @return mixed|JSON string (decoded JSON by default)
 	 */
 	public function _make_api_call( $endpoint, $params = array(), $method = 'GET', $body = null ) {
 		$ch = curl_init();
@@ -390,6 +400,8 @@ class WC_API_Client {
 		$return_no_headers =
 		$return = implode( "\r\n\r\n", $parts );
 
+		$this->last_headers = self::parse_header( $header );
+
 		if ( $this->_return_as_object ) {
 			$return = json_decode( $return );
 		}
@@ -399,6 +411,31 @@ class WC_API_Client {
 			$return = json_decode( $return );
 		}
 		return $return;
+	}
+
+	private static function parse_header( $raw_header )
+	{
+		$raw_headers = array_filter(
+			explode( "\n", preg_replace('/\n[ \t]/', '', str_replace( "\r\n", "\n", $raw_header ) )
+		), 'strlen' );
+
+		$headers = array();
+
+		foreach ( $raw_headers as $header ) {
+			// skip response codes (appears as HTTP/1.1 200 OK or HTTP/1.1 100 Continue)
+			if ( 'HTTP/' === substr( $header, 0, 5 ) )
+				continue;
+
+			list( $key, $value ) = explode( ':', $header, 2 );
+
+			$headers[ $key ] = ! isset( $headers[ $key ] ) ? $value :
+				array_merge(
+					is_array( $headers[ $key ] ) ? $headers[ $key ] : array( $headers[ $key ] ),
+					array( $value )
+				)
+			;
+		}
+		return $headers;
 	}
 
 	/**
