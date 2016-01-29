@@ -502,4 +502,6 @@ class WC_API_Client {
 		return $normalized_parameters;
 	}
 
+	public function __debugInfo() { return array('api_url' => $this->_api_url); }
+
 }
