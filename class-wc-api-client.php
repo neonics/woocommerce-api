@@ -14,7 +14,7 @@ class WC_API_Client {
 	/**
 	 * API base endpoint
 	 */
-	const API_ENDPOINT = 'wc-api/v2/';
+	const API_ENDPOINT = 'wc-api/v3/';
 
 	/**
 	 * The HASH alorithm to use for oAuth signature, SHA256 or SHA1
@@ -463,7 +463,10 @@ class WC_API_Client {
 		// form string to sign (first key)
 		$string_to_sign = $http_method . '&' . $base_request_uri . '&' . $query_string;
 
-		return base64_encode( hash_hmac( self::HASH_ALGORITHM, $string_to_sign, $this->_consumer_secret, true ) );
+		$secret = $this->_consumer_secret;
+		if ( preg_match( '@/v(\d+)/?$@', self::API_ENDPOINT, $m ) && intval($m[1]) >= 3 )
+			$secret .= '&';
+		return base64_encode( hash_hmac( self::HASH_ALGORITHM, $string_to_sign, $secret, true ) );
 	}
 
 	/**
