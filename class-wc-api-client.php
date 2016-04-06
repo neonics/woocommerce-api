@@ -450,19 +450,22 @@ class WC_API_Client {
 
 		// normalize parameter key/values and sort them
 		$params = $this->normalize_parameters( $params );
-		uksort( $params, 'strcmp' );
+		if ( ! uksort( $params, 'strcmp' ) )
+			throw new Exception( "Failed to sort params" );
 
 		// form query string
 		$query_params = array();
-		foreach ( $params as $param_key => $param_value ) {
-			$query_params[] = $param_key . '%3D' . $param_value; // join with equals sign
-		}
+		foreach ( $params as $param_key => $param_value )
+			if ( is_array( $param_value ) )
+				foreach ( $param_value as $param_key_inner => $param_value_inner )
+					$query_params[] = $param_key . '%255B' . $param_key_inner . '%255D%3D' . $param_value_inner;
+			else
+				$query_params[] = $param_key . '%3D' . $param_value; // join with equals sign
 
 		$query_string = implode( '%26', $query_params ); // join with ampersand
 
 		// form string to sign (first key)
 		$string_to_sign = $http_method . '&' . $base_request_uri . '&' . $query_string;
-
 		$secret = $this->_consumer_secret;
 		if ( preg_match( '@/v(\d+)/?$@', self::API_ENDPOINT, $m ) && intval($m[1]) >= 3 )
 			$secret .= '&';
@@ -496,13 +499,19 @@ class WC_API_Client {
 		foreach ( $parameters as $key => $value ) {
 
 			// percent symbols (%) must be double-encoded
-			$key   = str_replace( '%', '%25', rawurlencode( rawurldecode( $key ) ) );
-			$value = str_replace( '%', '%25', rawurlencode( rawurldecode( $value ) ) );
+			$key   = self::urlencode_rfc3986( $key );
+			$value = is_array( $value )
+				? array_map( array( __CLASS__, 'urlencode_rfc3986' ), $value )
+				: str_replace( '%', '%25', rawurlencode( rawurldecode( $value ) ) );
 
 			$normalized_parameters[ $key ] = $value;
 		}
 
 		return $normalized_parameters;
+	}
+
+	public static function urlencode_rfc3986( $v ) {
+		return str_replace( '%', '%25', rawurlencode( rawurldecode( $v ) ) );
 	}
 
 	public function __debugInfo() { return array('api_url' => $this->_api_url); }
