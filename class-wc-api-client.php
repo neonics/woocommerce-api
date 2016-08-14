@@ -14,7 +14,8 @@ class WC_API_Client {
 	/**
 	 * API base endpoint
 	 */
-	const API_ENDPOINT = 'wc-api/v3/';
+	#const API_ENDPOINT = 'wc-api/v3/';
+	const API_ENDPOINT = 'wp-json/wc/v1/';
 
 	/**
 	 * The HASH alorithm to use for oAuth signature, SHA256 or SHA1
@@ -343,6 +344,10 @@ class WC_API_Client {
 	 */
 	public $last_headers;
 
+	public $code;
+	public $total_pages;
+	public $total;
+
 	/**
 	 * Make the call to the API
 	 * @param  string $endpoint
@@ -375,40 +380,50 @@ class WC_API_Client {
 		curl_setopt( $ch, CURLOPT_URL, $this->_api_url . $endpoint . $paramString );
 		curl_setopt( $ch, CURLOPT_SSL_VERIFYPEER, false );
 		curl_setopt( $ch, CURLOPT_CONNECTTIMEOUT, 30 );
-        curl_setopt( $ch, CURLOPT_TIMEOUT, 30 );
-        curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
+		// A 100 Continue without additional headers and content may occur when the
+		// request times out; Taking more than 30 seconds is not uncommon.
+		#curl_setopt( $ch, CURLOPT_TIMEOUT, 30 );
+		curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
 
         if ( 'POST' === $method ) {
 			curl_setopt( $ch, CURLOPT_POST, true );
 			curl_setopt( $ch, CURLOPT_POSTFIELDS, json_encode( $body ) );
-    	} else if ( 'DELETE' === $method ) {
-			curl_setopt( $ch, CURLOPT_CUSTOMREQUEST, 'DELETE' );
-    	}
+			curl_setopt( $ch, CURLOPT_HTTPHEADER, [ 'Content-Type: application/json' ] );
+		} else if ( in_array( $method, ['PUT', 'DELETE', 'OPTIONS', 'PATCH' ] ) ) {
+			curl_setopt( $ch, CURLOPT_CUSTOMREQUEST, $method );
+		}
 
 		curl_setopt($ch, CURLOPT_HEADER, 1);
 		curl_setopt($ch, CURLINFO_HEADER_OUT, 1);
 
 		$return = curl_exec( $ch );
-
+		$this->code =
 		$code = curl_getinfo( $ch, CURLINFO_HTTP_CODE );
 
-		// sometimes a HTTP/1.1 100 Continue is returned, so there will be multiple header lines.
-		$parts = explode( "\r\n\r\n", $return );
-		$header = null;
-		while ( count($parts) && preg_match( "@^HTTP/\d@", $parts[0]  ) )
-			$header = array_shift( $parts );
-		$return_no_headers =
-		$return = implode( "\r\n\r\n", $parts );
-
+		list( $header, $body ) = self::split_response( $return );
 		$this->last_headers = self::parse_header( $header );
 
+		$pfx = strpos( self::API_ENDPOINT, 'wp-json' ) === false ? 'X-WC' : 'X-WP';
+		$this->total_pages = isset( $this->last_headers[ $tmp = $pfx . '-TotalPages' ] )
+			? $this->last_headers[ $tmp ]
+			: null;
+		$this->total = isset( $this->last_headers[ $tmp = $pfx . '-Total' ] )
+			? $this->last_headers[ $tmp ]
+			: null;
+
 		if ( $this->_return_as_object ) {
-			$return = json_decode( $return );
+			$return = json_decode( $body );
+			if ( $return === null ) {
+				trigger_error( __METHOD__ . ": code=$code json_error=" . json_last_error_msg(), E_USER_WARNING );
+				print( $body );
+			}
 		}
 
-		if ( empty( $return ) ) {
+		if ( $body === null ) { # empty( $return ) ) {
 			$return = '{"errors":[{"code":"' . $code . '","message":"cURL HTTP error ' . $code . '","details":"'.addslashes($return_no_headers).'"}]}';
 			$return = json_decode( $return );
+			if ( $return === null )
+				trigger_error( __METHOD__ . ": " . json_last_error_msg(), E_USER_WARNING );
 		}
 		return $return;
 	}
@@ -438,6 +453,21 @@ class WC_API_Client {
 		return $headers;
 	}
 
+
+	private static function split_response( $response ) {
+		$i=0;
+		$header = null;
+		$body = $response;
+		while ( preg_match( "@^HTTP.*?\r\n\r\n@s", $body, $m ) && ++ $i < 5 ) {
+			$header .= $m[0];
+			$body = substr( $body, strlen( $m[0] ) );
+		}
+		return [ $header, $body ];
+	}
+
+
+
+
 	/**
 	 * Generate oAuth signature
 	 * @param  array  $params
@@ -446,6 +476,7 @@ class WC_API_Client {
 	 * @return string
 	 */
 	public function generate_oauth_signature( $params, $http_method, $endpoint ) {
+		$http_method = strtoupper( $http_method ); // just in case
 		$base_request_uri = rawurlencode( $this->_api_url . $endpoint );
 
 		// normalize parameter key/values and sort them
@@ -467,7 +498,7 @@ class WC_API_Client {
 		// form string to sign (first key)
 		$string_to_sign = $http_method . '&' . $base_request_uri . '&' . $query_string;
 		$secret = $this->_consumer_secret;
-		if ( preg_match( '@/v(\d+)/?$@', self::API_ENDPOINT, $m ) && intval($m[1]) >= 3 )
+		if ( preg_match( '@/v(\d+)/?$@', self::API_ENDPOINT, $m ) && intval($m[1]) >= 3 || self::API_ENDPOINT == 'wp-json/wc/v1/' )
 			$secret .= '&';
 		return base64_encode( hash_hmac( self::HASH_ALGORITHM, $string_to_sign, $secret, true ) );
 	}
