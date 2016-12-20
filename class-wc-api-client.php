@@ -481,17 +481,17 @@ class WC_API_Client {
 
 		// normalize parameter key/values and sort them
 		$params = $this->normalize_parameters( $params );
-		if ( ! uksort( $params, 'strcmp' ) )
-			throw new Exception( "Failed to sort params" );
-
 		// form query string
 		$query_params = array();
 		foreach ( $params as $param_key => $param_value )
 			if ( is_array( $param_value ) )
-				foreach ( $param_value as $param_key_inner => $param_value_inner )
-					$query_params[] = $param_key . '%255B' . $param_key_inner . '%255D%3D' . $param_value_inner;
+				foreach ( self::flatten_value( $param_value ) as $param_key_inner => $param_value_inner )
+					$query_params[] = $param_key . $param_key_inner . '%3D' . $param_value_inner;
 			else
 				$query_params[] = $param_key . '%3D' . $param_value; // join with equals sign
+
+		if ( ! usort( $query_params, 'strcmp' ) )
+			throw new Exception( "Failed to sort params" );
 
 		$query_string = implode( '%26', $query_params ); // join with ampersand
 
@@ -501,6 +501,18 @@ class WC_API_Client {
 		if ( preg_match( '@/v(\d+)/?$@', self::API_ENDPOINT, $m ) && intval($m[1]) >= 3 || self::API_ENDPOINT == 'wp-json/wc/v1/' )
 			$secret .= '&';
 		return base64_encode( hash_hmac( self::HASH_ALGORITHM, $string_to_sign, $secret, true ) );
+	}
+
+	private static function flatten_value( $value ) {
+		$ret = [];
+		foreach ( $value as $k => $v )
+			if ( is_array( $v ) )
+				foreach ( self::flatten_value( $v ) as $x => $y )
+					$ret[ '%255B' . $k . '%255D' . $x ] = $y;
+			else
+				$ret[ '%255B' . $k . '%255D' ] = $v;
+
+		return $ret;
 	}
 
 	/**
@@ -531,9 +543,7 @@ class WC_API_Client {
 
 			// percent symbols (%) must be double-encoded
 			$key   = self::urlencode_rfc3986( $key );
-			$value = is_array( $value )
-				? array_map( array( __CLASS__, 'urlencode_rfc3986' ), $value )
-				: str_replace( '%', '%25', rawurlencode( rawurldecode( $value ) ) );
+			$value = self::urlencode_rfc3986( $value );
 
 			$normalized_parameters[ $key ] = $value;
 		}
@@ -542,7 +552,9 @@ class WC_API_Client {
 	}
 
 	public static function urlencode_rfc3986( $v ) {
-		return str_replace( '%', '%25', rawurlencode( rawurldecode( $v ) ) );
+		return is_array( $v )
+			? array_map( array( __CLASS__, 'urlencode_rfc3986' ), $v )
+			: str_replace( '%', '%25', rawurlencode( rawurldecode( $v ) ) );
 	}
 
 	public function __debugInfo() { return array('api_url' => $this->_api_url); }
