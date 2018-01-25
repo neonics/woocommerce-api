@@ -479,8 +479,13 @@ class WC_API_Client {
 		$http_method = strtoupper( $http_method ); // just in case
 		$base_request_uri = rawurlencode( $this->_api_url . $endpoint );
 
+		# This should be done later, but woo has a bug. See below.
+		if ( ! uksort( $params, 'strcmp' ) )
+			throw new Exception( "Failed to sort params" );
+
 		// normalize parameter key/values and sort them
 		$params = $this->normalize_parameters( $params );
+
 		// form query string
 		$query_params = array();
 		foreach ( $params as $param_key => $param_value )
@@ -490,8 +495,9 @@ class WC_API_Client {
 			else
 				$query_params[] = $param_key . '%3D' . $param_value; // join with equals sign
 
-		if ( ! usort( $query_params, 'strcmp' ) )
-			throw new Exception( "Failed to sort params" );
+		# This is the correct place to sort, however woocommerce has a bug where it sorts before normalizing/flattening.
+		#if ( ! uksort( $query_params, 'strcmp' ) )
+		#	throw new Exception( "Failed to sort params" );
 
 		$query_string = implode( '%26', $query_params ); // join with ampersand
 
